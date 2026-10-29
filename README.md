@@ -6,6 +6,48 @@ Designed to sit between any class-compliant USB MIDI keyboard / controller and h
 
 ---
 
+## 🏗️ System Architecture
+
+```mermaid
+flowchart LR
+    subgraph Inputs ["Input Transports"]
+        USB["USB MIDI Keyboard<br/>(via Native USB-C Host)"]
+        BLE["Wireless BLE MIDI<br/>(Tablet / Phone / Controller)"]
+    end
+
+    subgraph HardwareHub ["ESP32-S3 MIDI Brain"]
+        Router["MidiIO Router & Patchbay"]
+        
+        subgraph Chain ["Layered Pedalboard Audio Chain"]
+            direction TB
+            E0["0. Direct Bypass<br/>(Transpose & Velocity Curves)"]
+            --> E1["3. Turing Co-Pilot<br/>(Generative Algorithmic Sequencer)"]
+            --> E2["6. Physics & Bounce<br/>(Gravity & Elasticity Echoes)"]
+            --> E3["5. Microtonal Engine<br/>(Dynamic Just Intonation & Maqam)"]
+            --> E4["2. Lo-Fi Cassette<br/>(Wow, Flutter & Tape Age)"]
+            --> E5["4. FM Timbre Morph<br/>(Vector Macro CC Crossfader)"]
+        end
+
+        UI["1.54' E-Paper Display<br/>(200x200 1-bit SPI HUD)"]
+        Controls["5 Encoders + 5 Buttons<br/>+ 5 LEDs + 2 Latching Switches"]
+    end
+
+    subgraph Outputs ["Hardware Outputs"]
+        Synth["M-VAVE FM-1 / Hardware Synth<br/>(3.5mm TRS Type-A MIDI)"]
+        Canvas["7. Visual Canvas<br/>(Live Generative Particle Art)"]
+    end
+
+    USB --> Router
+    BLE --> Router
+    Router --> Chain
+    Chain --> Synth
+    Chain --> Canvas
+    Controls -.-> Router
+    Chain -.-> UI
+```
+
+---
+
 ## 🌟 Key Features
 
 * **100% Computer-Free & Standalone:** Powered by a dual-core 240MHz ESP32-S3. No computer or DAW required for performance.
@@ -43,20 +85,143 @@ Designed to sit between any class-compliant USB MIDI keyboard / controller and h
 
 ---
 
-## ⚡ Master Hardware Pinout (ESP32-S3)
+## ⚡ Master Hardware Pinout Table
 
-All inputs and peripherals have been mapped to avoid strapping pin conflicts:
+All 5 rotary encoders and the display sit on clean GPIOs, while the boot-strapping pins (`GPIO 0, 45, 46`) are protected. The 5 layer buttons share a single ADC line via an analog resistor ladder, freeing up dedicated lines for 5 individual layer status LEDs.
 
-| Peripheral | Sub-Signal | GPIO Pin | Notes |
+| Peripheral | Sub-Signal | ESP32-S3 GPIO | Description / Connection Details |
 | :--- | :--- | :---: | :--- |
-| **USB Host** | D- / D+ | **GPIO 19 / 20** | Pre-wired internally to Native USB-C port |
-| **TRS MIDI OUT** | UART1 TX | **GPIO 17** | To 3.5mm Tip via 33Ω resistor |
-| **1.54" E-Paper** | MOSI / SCK / CS / DC / BUSY | **GPIO 11 / 12 / 10 / 9 / 7** | RST tied to `+3.3V / EN` |
-| **Param Encoders 1–4**| CLK / DT / SW | **GPIO 1–6, 13–16, 18, 21** | 4 parameter columns |
-| **Nav Encoder 5** | CLK / DT / SW | **GPIO 38 / 41 / 0** | Rotate: Navigate, Click: Visualizer |
-| **5-Button Bus** | Analog Resistor Ladder | **GPIO 8** | Reads all 5 layer buttons on 1 ADC pin |
-| **5 Layer LEDs** | Standard LEDs | **GPIO 47, 48, 45, 46, 42** | Lo-Fi, Turing, Morph, Tuning, Physics |
-| **2 Latching Switches**| Master Bypass / Engine Latch | **GPIO 39 / 40** | LEDs wired across switches (0 extra GPIOs) |
+| **USB Host** | USB D- | **GPIO 19** | Pre-wired to native OTG USB-C port |
+| | USB D+ | **GPIO 20** | Pre-wired to native OTG USB-C port |
+| **TRS MIDI OUT** | UART1 TX | **GPIO 17** | To 3.5mm Stereo Jack Tip via 33Ω resistor |
+| **1.54" E-Paper** | SPI MOSI (DIN) | **GPIO 11** | SPI Data In |
+| | SPI SCK (CLK) | **GPIO 12** | SPI Clock |
+| | CS (Chip Select) | **GPIO 10** | Active Low |
+| | DC (Data/Command)| **GPIO 9** | High = Data, Low = Command |
+| | BUSY | **GPIO 7** | High when refreshing |
+| | RST (Reset) | **+3.3V / EN** | Tied to +3.3V or EN pin (Software reset command `0x12` used) |
+| **Param Encoder 1**| CLK / DT / SW | **GPIO 1 / 2 / 3** | Dedicated to **Column 1 Parameter** |
+| **Param Encoder 2**| CLK / DT / SW | **GPIO 4 / 5 / 6** | Dedicated to **Column 2 Parameter** |
+| **Param Encoder 3**| CLK / DT / SW | **GPIO 13 / 14 / 15** | Dedicated to **Column 3 Parameter** |
+| **Param Encoder 4**| CLK / DT / SW | **GPIO 16 / 18 / 21** | Dedicated to **Column 4 Parameter** |
+| **Nav Encoder 5** | CLK / DT | **GPIO 38 / 41** | Rotate: Smoothly cycles all 8 screens |
+| *(Screen Select)* | SW (Push Switch) | **GPIO 0** | Click: Jump to / return from Visual Canvas |
+| **5-Button Bus** | Analog ADC | **GPIO 8** | Reads all 5 momentary layer buttons via Resistor Ladder |
+| **Layer 1 LED** | Lo-Fi Active | **GPIO 47** | Lights up when Lo-Fi Cassette layer is active |
+| **Layer 2 LED** | Turing Active | **GPIO 48** | Lights up when Turing Co-Pilot layer is active |
+| **Layer 3 LED** | Morph Active | **GPIO 45** | Lights up when FM Timbre Morph layer is active |
+| **Layer 4 LED** | Microtonal Active| **GPIO 46** | Lights up when Microtonal Engine layer is active |
+| **Layer 5 LED** | Physics Active | **GPIO 42** | Lights up when Physics & Bounce layer is active |
+| **Latching Switch 1**| Master Bypass | **GPIO 39** | Toggle to GND: ON = Direct Bypass, OFF = Layered FX Chain |
+| **Latching Switch 2**| Engine Action | **GPIO 40** | Toggle to GND: Freeze / Tape Brake / Infinite Bounce / Arm Reset |
+| **Switch 1 & 2 LEDs**| Switch Status | **0 GPIOs** | Wired across switch terminals from +3.3V via 330Ω |
+| **Power LED** | Power Status | **0 GPIOs** | Wired from +3.3V rail via 1kΩ to GND |
+
+---
+
+## 🔌 Circuit Schematics
+
+### 1. 3.5mm TRS MIDI OUT (Standard Type-A for M-VAVE FM-1)
+
+Standard 3.3V MIDI specification requires **only two 33Ω resistors**:
+
+```text
+ESP32-S3                               3.5mm Female Jack (TRS Type-A)
+────────────────────────               ──────────────────────────────
+GPIO 17 (TX1) ───[ 33Ω Resistor ]───────────────────► TIP   (MIDI Sink / Pin 5)
+
++3.3V         ───[ 33Ω Resistor ]───────────────────► RING  (MIDI Source / Pin 4)
+
+GND           ──────────────────────────────────────► SLEEVE (Shield / Ground)
+```
+
+> [!NOTE]
+> The M-VAVE FM-1 uses standard **TRS Type-A**. If you ever connect a synth and receive no signal, swapping Tip and Ring wires is the standard fix for Type-A vs Type-B pinout differences.
+
+---
+
+### 2. 5-Button Analog Resistor Ladder (Single Pin: GPIO 8)
+
+All 5 momentary pushbuttons are read via a single analog ADC pin (`GPIO 8`), using a 10kΩ pull-up to `+3.3V`. Each button pulls the pin down through a distinct resistance:
+
+```text
++3.3V ───[ 10kΩ Pull-Up ]───┬────────► ESP32-S3 GPIO 8 (ADC1)
+                            │
+                            ├──[ Button 1: Lo-Fi ]────────► GND (0Ω ➔ ~0.0V / ADC < 250)
+                            │
+                            ├──[ Button 2: Turing ]───────[ 1.0kΩ ]────► GND (~0.3V / ADC ~370)
+                            │
+                            ├──[ Button 3: Morph ]────────[ 2.2kΩ ]────► GND (~0.6V / ADC ~740)
+                            │
+                            ├──[ Button 4: Microtonal ]───[ 3.9kΩ ]────► GND (~0.9V / ADC ~1150)
+                            │
+                            └──[ Button 5: Physics ]──────[ 6.8kΩ ]────► GND (~1.3V / ADC ~1650)
+```
+
+*When no button is pressed, the line is pulled high to +3.3V (ADC > 3400).*
+
+---
+
+### 3. 5 Discrete Layer Status LEDs
+
+Standard LEDs driven directly by dedicated GPIO pins with current-limiting resistors:
+
+```text
+GPIO 47 ────► [Anode +] [LED 1: Lo-Fi]    [Cathode -] ────[ 330Ω ]────► GND
+GPIO 48 ────► [Anode +] [LED 2: Turing]   [Cathode -] ────[ 330Ω ]────► GND
+GPIO 45 ────► [Anode +] [LED 3: Morph]    [Cathode -] ────[ 330Ω ]────► GND
+GPIO 46 ────► [Anode +] [LED 4: Tuning]   [Cathode -] ────[ 330Ω ]────► GND
+GPIO 42 ────► [Anode +] [LED 5: Physics]  [Cathode -] ────[ 330Ω ]────► GND
+```
+
+---
+
+### 4. Latching Toggle Switches + Self-Illuminating LEDs (0 Extra GPIOs)
+
+Because each switch latches to `GND` when engaged, wiring the status LED in parallel with the switch ground path automatically illuminates the LED whenever the switch is flipped ON—requiring **zero additional microcontoller pins**:
+
+```text
++3.3V ───[ 330Ω Resistor ]───► [LED Anode +] [LED Cathode -] ──┐
+                                                                ├──► ESP32 GPIO (39 or 40)
+                                                                │
+                                                       [Latching Switch]
+                                                                │
+GND   ──────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 5. Standard EC11 Rotary Encoders
+
+Each 5-pin rotary encoder is wired as follows:
+
+```text
+Encoder Rotation Side (3 Pins):
+  Pin A (CLK) ────────► ESP32 GPIO (Internal Pull-Up)
+  Pin C (GND) ────────► Common Ground (GND)
+  Pin B (DT)  ────────► ESP32 GPIO (Internal Pull-Up)
+
+Encoder Push Switch Side (2 Pins):
+  SW Pin 1    ────────► ESP32 GPIO (Internal Pull-Up)
+  SW Pin 2    ────────► Common Ground (GND)
+```
+
+---
+
+### 6. 1.54" Waveshare E-Paper Display (SPI)
+
+```text
+Display Pin                 ESP32-S3 Pin
+───────────                 ────────────
+VCC         ──────────────► +3.3V
+GND         ──────────────► GND
+DIN (MOSI)  ──────────────► GPIO 11
+CLK (SCK)   ──────────────► GPIO 12
+CS          ──────────────► GPIO 10
+DC          ──────────────► GPIO 9
+RST         ──────────────► +3.3V or EN (Software reset command used)
+BUSY        ──────────────► GPIO 7
+```
 
 ---
 
@@ -77,7 +242,7 @@ All inputs and peripherals have been mapped to avoid strapping pin conflicts:
 
 ## 🛠️ Step 1 Hardware Diagnostic Sketch
 
-Before wiring the full control panel, you can verify your 3.5mm TRS connection to your synthesizer in under 2 minutes:
+Before wiring the full control panel, verify your 3.5mm TRS connection to your synthesizer in under 2 minutes:
 * Open and flash [`step1_midi_out_test.ino`](step1_midi_out_test.ino).
 * It will play an alternating octave C4/C5 test arpeggio on MIDI Channel 1 to verify audio output immediately.
 
