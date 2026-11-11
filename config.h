@@ -8,6 +8,7 @@
 // --- Feature Toggles ---
 #define ENABLE_USB_HOST       1    // Native ESP32-S3 USB OTG Host (GPIO 19/20)
 #define ENABLE_BLE_MIDI       1    // Wireless Bluetooth Low Energy MIDI
+#define ENABLE_SD_CARD        1    // MicroSD Card support for MIDI recording, presets & Sysex
 #define EPD_WIDTH             200  // 1.54" E-Paper width in pixels
 #define EPD_HEIGHT            200  // 1.54" E-Paper height in pixels
 #define EPD_3COLOR_MODE       0    // Set to 1 if using a 3-color (B/W/Red) 1.54" module
@@ -18,11 +19,18 @@
 
 // --- 1.54" E-Paper SPI Display (Waveshare SSD1681/SSD1608) ---
 // Note: E-Paper RST connects to +3.3V / EN (uses software reset 0x12)
-#define PIN_EPD_MOSI          11   // SPI DIN
-#define PIN_EPD_SCK           12   // SPI CLK
-#define PIN_EPD_CS            10   // Chip Select
+#define PIN_EPD_MOSI          11   // SPI DIN (Shared with SD Card)
+#define PIN_EPD_SCK           12   // SPI CLK (Shared with SD Card)
+#define PIN_EPD_CS            10   // E-Paper Chip Select (Dedicated)
 #define PIN_EPD_DC            9    // Data / Command
 #define PIN_EPD_BUSY          7    // Busy status
+
+// --- MicroSD Card SPI Bus (Standard FAT32) ---
+// Shares high-speed SPI bus with E-Paper (MOSI 11, SCK 12); uses dedicated CS & MISO
+#define PIN_SD_MOSI           11   // Shared SPI MOSI
+#define PIN_SD_SCK            12   // Shared SPI SCK
+#define PIN_SD_MISO           21   // SPI MISO (Card data out to ESP32)
+#define PIN_SD_CS             18   // MicroSD Chip Select (Dedicated)
 
 // --- 4 Parameter Rotary Encoders (EC11 Standard with Push Switch) ---
 // Encoder 1 (Column 1 Parameter)
@@ -42,8 +50,8 @@
 
 // Encoder 4 (Column 4 Parameter)
 #define PIN_ENC4_A            16
-#define PIN_ENC4_B            18
-#define PIN_ENC4_SW           21
+#define PIN_ENC4_B            35
+#define PIN_ENC4_SW           36
 
 // --- 5th Dedicated Navigation Rotary Encoder (Screen Selector) ---
 #define PIN_ENC_NAV_A         38   // Turn to scroll all 8 screens

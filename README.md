@@ -94,16 +94,20 @@ All 5 rotary encoders and the display sit on clean GPIOs, while the boot-strappi
 | **USB Host** | USB D- | **GPIO 19** | Pre-wired to native OTG USB-C port |
 | | USB D+ | **GPIO 20** | Pre-wired to native OTG USB-C port |
 | **TRS MIDI OUT** | UART1 TX | **GPIO 17** | To 3.5mm Stereo Jack Tip via 33Ω resistor |
-| **1.54" E-Paper** | SPI MOSI (DIN) | **GPIO 11** | SPI Data In |
-| | SPI SCK (CLK) | **GPIO 12** | SPI Clock |
-| | CS (Chip Select) | **GPIO 10** | Active Low |
+| **1.54" E-Paper** | SPI MOSI (DIN) | **GPIO 11** | Shared SPI Data In |
+| | SPI SCK (CLK) | **GPIO 12** | Shared SPI Clock |
+| | CS (Chip Select) | **GPIO 10** | E-Paper Active Low Chip Select |
 | | DC (Data/Command)| **GPIO 9** | High = Data, Low = Command |
 | | BUSY | **GPIO 7** | High when refreshing |
 | | RST (Reset) | **+3.3V / EN** | Tied to +3.3V or EN pin (Software reset command `0x12` used) |
+| **MicroSD Card** | SPI MOSI | **GPIO 11** | Shared SPI MOSI |
+| | SPI SCK | **GPIO 12** | Shared SPI Clock |
+| | SPI MISO | **GPIO 21** | Card Data Out to ESP32 |
+| | CS (Chip Select) | **GPIO 18** | MicroSD Dedicated Chip Select |
 | **Param Encoder 1**| CLK / DT / SW | **GPIO 1 / 2 / 3** | Dedicated to **Column 1 Parameter** |
 | **Param Encoder 2**| CLK / DT / SW | **GPIO 4 / 5 / 6** | Dedicated to **Column 2 Parameter** |
 | **Param Encoder 3**| CLK / DT / SW | **GPIO 13 / 14 / 15** | Dedicated to **Column 3 Parameter** |
-| **Param Encoder 4**| CLK / DT / SW | **GPIO 16 / 18 / 21** | Dedicated to **Column 4 Parameter** |
+| **Param Encoder 4**| CLK / DT / SW | **GPIO 16 / 35 / 36** | Dedicated to **Column 4 Parameter** |
 | **Nav Encoder 5** | CLK / DT | **GPIO 38 / 41** | Rotate: Smoothly cycles all 8 screens |
 | *(Screen Select)* | SW (Push Switch) | **GPIO 0** | Click: Jump to / return from Visual Canvas |
 | **5-Button Bus** | Analog ADC | **GPIO 8** | Reads all 5 momentary layer buttons via Resistor Ladder |
@@ -208,19 +212,30 @@ Encoder Push Switch Side (2 Pins):
 
 ---
 
-### 6. 1.54" Waveshare E-Paper Display (SPI)
+### 6. 1.54" Waveshare E-Paper Display & MicroSD Card (Shared SPI)
+
+The display and SD card share the high-speed SPI bus (MOSI `GPIO 11`, SCK `GPIO 12`) with independent Chip Selects:
 
 ```text
 Display Pin                 ESP32-S3 Pin
 ───────────                 ────────────
 VCC         ──────────────► +3.3V
 GND         ──────────────► GND
-DIN (MOSI)  ──────────────► GPIO 11
-CLK (SCK)   ──────────────► GPIO 12
-CS          ──────────────► GPIO 10
+DIN (MOSI)  ──────────────► GPIO 11 (Shared)
+CLK (SCK)   ──────────────► GPIO 12 (Shared)
+CS          ──────────────► GPIO 10 (E-Paper CS)
 DC          ──────────────► GPIO 9
 RST         ──────────────► +3.3V or EN (Software reset command used)
 BUSY        ──────────────► GPIO 7
+
+MicroSD Module Pin          ESP32-S3 Pin
+──────────────────          ────────────
+VCC         ──────────────► +3.3V (or 5V if 3.3V LDO on board)
+GND         ──────────────► GND
+MOSI        ──────────────► GPIO 11 (Shared)
+SCK (CLK)   ──────────────► GPIO 12 (Shared)
+MISO        ──────────────► GPIO 21
+CS          ──────────────► GPIO 18 (MicroSD CS)
 ```
 
 ---

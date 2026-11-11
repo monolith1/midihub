@@ -29,6 +29,7 @@
 #include "midi_io.h"
 #include "inputs.h"
 #include "storage.h"
+#include "storage_sd.h"
 #include "display_ui.h"
 
 // Engine Implementations
@@ -144,9 +145,10 @@ void handleIncomingPitchBend(uint8_t channel, int16_t bend) {
   MidiIO::sendPitchBend(channel, bend);
 }
 
-// --- Post-Engine Output Monitor Tap (Drives Reactive Visualizer!) ---
+// --- Post-Engine Output Monitor Tap (Drives Reactive Visualizer & SD Recorder!) ---
 void handleOutputTapNoteOn(uint8_t channel, uint8_t pitch, uint8_t velocity) {
   g_engineVisualizer.recordOutputNoteOn(pitch, velocity);
+  StorageSD::logMidiEvent(0x90 | (channel & 0x0F), pitch, velocity);
   if (g_currentMode == MODE_VISUALIZER) {
     DisplayUI::markDirty();
   }
@@ -154,6 +156,7 @@ void handleOutputTapNoteOn(uint8_t channel, uint8_t pitch, uint8_t velocity) {
 
 void handleOutputTapNoteOff(uint8_t channel, uint8_t pitch) {
   g_engineVisualizer.recordOutputNoteOff(pitch);
+  StorageSD::logMidiEvent(0x80 | (channel & 0x0F), pitch, 0);
 }
 
 // --- Navigate Screens Cleanly (via Dedicated Navigation Encoder) ---
@@ -209,8 +212,9 @@ void setup() {
   MidiIO::setPitchBendCallback(handleIncomingPitchBend);
   MidiIO::setOutputMonitorCallbacks(handleOutputTapNoteOn, handleOutputTapNoteOff);
 
-  // 4. Initialize Non-Volatile Storage (NVS Flash)
+  // 4. Initialize Non-Volatile Storage (NVS Flash & Optional SD Card)
   StorageManager::init();
+  StorageSD::init();
 
   // Hardware Boot Shortcut: Hold Encoder 1 + Encoder 4 buttons on power-up to Factory Reset!
   if (digitalRead(PIN_ENC1_SW) == LOW && digitalRead(PIN_ENC4_SW) == LOW) {

@@ -227,24 +227,16 @@ void DisplayUI::epdSendData(uint8_t data) {
 void DisplayUI::init() {
   pinMode(PIN_EPD_CS, OUTPUT);
   pinMode(PIN_EPD_DC, OUTPUT);
-  pinMode(PIN_EPD_RST, OUTPUT);
   pinMode(PIN_EPD_BUSY, INPUT);
 
   digitalWrite(PIN_EPD_CS, HIGH);
   digitalWrite(PIN_EPD_DC, HIGH);
-  digitalWrite(PIN_EPD_RST, HIGH);
 
   // Initialize hardware SPI on pins SCK=12, MOSI=11
   s_epdSpi.begin(PIN_EPD_SCK, -1, PIN_EPD_MOSI, PIN_EPD_CS);
   s_epdSpi.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
 
-  // Hardware Reset Pulse (brief, during boot setup only)
-  digitalWrite(PIN_EPD_RST, LOW);
-  delay(10);
-  digitalWrite(PIN_EPD_RST, HIGH);
-  delay(10);
-
-  // SSD1681 / 1.54" V2 Initialization Sequence
+  // SSD1681 / 1.54" V2 Initialization Sequence (Software Reset 0x12)
   epdSendCommand(0x12); // SWRESET
   delay(10);
 
