@@ -24,7 +24,9 @@ public:
 
   void init() override {
     m_lastUpdate = millis();
-    applyMorph();
+    if (isLayerActive()) {
+      applyMorph();
+    }
   }
 
   void update() override {

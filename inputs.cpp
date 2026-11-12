@@ -48,8 +48,8 @@ void InputManager::init() {
     s_encoders[i].lastButtonState = digitalRead(s_encoders[i].pinSW);
   }
 
-  // 2. Configure Analog Resistor Ladder Button Pin (ADC1)
-  pinMode(PIN_BTN_BUS_ADC, INPUT);
+  // 2. Configure Analog Resistor Ladder Button Pin (ADC1 with internal pull-up so floating pin never triggers)
+  pinMode(PIN_BTN_BUS_ADC, INPUT_PULLUP);
   analogReadResolution(12); // 0 .. 4095
 
   // 3. Configure 5 Dedicated Sound Layer Status LEDs
@@ -94,6 +94,7 @@ void InputManager::update() {
   }
 
   // 2. Poll 5-Button Resistor Ladder on PIN_BTN_BUS_ADC (GPIO 8)
+#if ENABLE_BTN_LADDER
   // Voltage brackets allow standard daisy-chain (1k resistors) or individual dividers:
   // - Button 1 (Lo-Fi):      ADC < 250         (~0.0V - 0.2V)
   // - Button 2 (Turing):     ADC 250 .. 600    (~0.3V - 0.5V)
@@ -129,6 +130,7 @@ void InputManager::update() {
     s_lastDetectedBtn = -1;
     s_btnArmed = false;
   }
+#endif
 
   // 3. Poll 2 Latching Switches
   s_sw1Changed = false;

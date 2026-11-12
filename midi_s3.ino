@@ -114,6 +114,7 @@ void toggleSoundLayer(uint8_t layerIdx) {
 
 // --- MIDI Router Callbacks (Flows through the Layered Pedalboard Chain!) ---
 void handleIncomingNoteOn(uint8_t channel, uint8_t pitch, uint8_t velocity) {
+  Serial.printf("[NOTE IN] ch=%d note=%d vel=%d\n", channel, pitch, velocity);
   if (InputManager::isSwitch1Active() || g_currentMode == MODE_BYPASS) {
     // Master Bypass ON: only apply Bypass transpose/velocity curve and send directly out
     MidiIO::sendNoteOn(channel, pitch, velocity);

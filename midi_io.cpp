@@ -15,7 +15,7 @@
 #endif
 
 // --- Static Member Definitions ---
-HardwareSerial MidiIO::s_midiSerial(1);
+#define s_midiSerial Serial1
 NoteOnCallback MidiIO::s_noteOnCb = nullptr;
 NoteOffCallback MidiIO::s_noteOffCb = nullptr;
 ControlChangeCallback MidiIO::s_ccCb = nullptr;
@@ -159,7 +159,7 @@ static void openUsbMidiDevice(uint8_t devAddr) {
 
   // Parse configuration descriptor for MIDI Streaming (Class 0x01, SubClass 0x03) or Bulk endpoints
   const usb_config_desc_t* configDesc = nullptr;
-  if (usb_host_get_active_config_desc(slot.devHandle, &configDesc) == ESP_OK && configDesc) {
+  if (usb_host_get_active_config_descriptor(slot.devHandle, &configDesc) == ESP_OK && configDesc) {
     const uint8_t* p = (const uint8_t*)configDesc;
     int totalLen = configDesc->wTotalLength;
     int offset = 0;
@@ -275,17 +275,83 @@ static void usbHostLibTask(void* arg) {
 #endif // ENABLE_USB_HOST
 
 // ==============================================================================
-// Bluetooth Low Energy (BLE) MIDI Service Implementation
+// Bluetooth Low Energy (BLE) MIDI Service + Multi-Slot Central Auto-Connect
 // ==============================================================================
+#define MAX_BLE_CLIENTS 2
+
 static bool s_bleConnected = false;
+static bool s_bleDoConnect = false;
+static bool s_bleScanning = false;
+static uint32_t s_lastBleScanTime = 0;
+
+struct BleClientSlot {
+  bool connected;
+  BLEClient* client;
+  char address[18];
+  char name[28];
+};
+
+static BleClientSlot s_bleSlots[MAX_BLE_CLIENTS] = {};
 
 #if ENABLE_BLE_MIDI
 static BLECharacteristic* s_pBleMidiChar = nullptr;
+static BLEAdvertisedDevice* s_pFoundBleDevice = nullptr;
+
+static bool isBleAddressConnected(const char* addr) {
+  for (int i = 0; i < MAX_BLE_CLIENTS; i++) {
+    if (s_bleSlots[i].connected && strcasecmp(s_bleSlots[i].address, addr) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static uint8_t getConnectedBleClientCount() {
+  uint8_t c = 0;
+  for (int i = 0; i < MAX_BLE_CLIENTS; i++) {
+    if (s_bleSlots[i].connected) c++;
+  }
+  return c;
+}
+
+static void parseBleMidiPacket(const uint8_t* data, size_t len) {
+  if (!data || len < 3) return;
+
+  // Parse BLE-MIDI packet: [header][timestamp][status][data1][data2]...
+  for (size_t i = 2; i < len; i++) {
+    uint8_t b = data[i];
+    if ((b & 0x80) && b != 0xF7) {
+      // Skip interleaved BLE-MIDI timestamp byte if followed immediately by a status byte
+      if (i + 1 < len && (data[i + 1] & 0x80) && data[i + 1] != 0xF7) {
+        continue;
+      }
+      uint8_t status = b & 0xF0;
+      uint8_t ch = (b & 0x0F) + 1;
+      if (status == 0x90 && i + 2 < len) {
+        uint8_t note = data[i + 1] & 0x7F;
+        uint8_t vel  = data[i + 2] & 0x7F;
+        if (vel > 0) MidiIO::dispatchIncomingNoteOn(IN_PORT_BLE, ch, note, vel);
+        else         MidiIO::dispatchIncomingNoteOff(IN_PORT_BLE, ch, note);
+        i += 2;
+      } else if (status == 0x80 && i + 2 < len) {
+        MidiIO::dispatchIncomingNoteOff(IN_PORT_BLE, ch, data[i + 1] & 0x7F);
+        i += 2;
+      } else if (status == 0xB0 && i + 2 < len) {
+        MidiIO::dispatchIncomingCC(IN_PORT_BLE, ch, data[i + 1] & 0x7F, data[i + 2] & 0x7F);
+        i += 2;
+      } else if (status == 0xE0 && i + 2 < len) {
+        int16_t bend = (int16_t)((data[i + 1] & 0x7F) | ((data[i + 2] & 0x7F) << 7)) - 8192;
+        MidiIO::dispatchIncomingPitchBend(IN_PORT_BLE, ch, bend);
+        i += 2;
+      }
+    }
+  }
+}
 
 class BleMidiServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) override {
     s_bleConnected = true;
-    Serial.println("[BLE MIDI] Wireless device connected.");
+    Serial.println("[BLE MIDI] Wireless device connected to S3.");
   }
   void onDisconnect(BLEServer* pServer) override {
     s_bleConnected = false;
@@ -297,37 +363,121 @@ class BleMidiServerCallbacks : public BLEServerCallbacks {
 class BleMidiCharCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* pChar) override {
     String val = pChar->getValue();
-    size_t len = val.length();
-    if (len < 3) return;
-    const uint8_t* data = (const uint8_t*)val.c_str();
+    parseBleMidiPacket((const uint8_t*)val.c_str(), val.length());
+  }
+};
 
-    // Parse BLE-MIDI packet: [header][timestamp][status][data1][data2]...
-    for (size_t i = 2; i < len; i++) {
-      uint8_t b = data[i];
-      if ((b & 0x80) && b != 0xF7) {
-        uint8_t status = b & 0xF0;
-        uint8_t ch = (b & 0x0F) + 1;
-        if (status == 0x90 && i + 2 < len) {
-          uint8_t note = data[i + 1] & 0x7F;
-          uint8_t vel  = data[i + 2] & 0x7F;
-          if (vel > 0) MidiIO::dispatchIncomingNoteOn(IN_PORT_BLE, ch, note, vel);
-          else         MidiIO::dispatchIncomingNoteOff(IN_PORT_BLE, ch, note);
-          i += 2;
-        } else if (status == 0x80 && i + 2 < len) {
-          MidiIO::dispatchIncomingNoteOff(IN_PORT_BLE, ch, data[i + 1] & 0x7F);
-          i += 2;
-        } else if (status == 0xB0 && i + 2 < len) {
-          MidiIO::dispatchIncomingCC(IN_PORT_BLE, ch, data[i + 1] & 0x7F, data[i + 2] & 0x7F);
-          i += 2;
-        } else if (status == 0xE0 && i + 2 < len) {
-          int16_t bend = (int16_t)((data[i + 1] & 0x7F) | ((data[i + 2] & 0x7F) << 7)) - 8192;
-          MidiIO::dispatchIncomingPitchBend(IN_PORT_BLE, ch, bend);
-          i += 2;
-        }
+static void bleClientNotifyCallback(BLERemoteCharacteristic* pRemoteChar, uint8_t* pData, size_t length, bool isNotify) {
+  parseBleMidiPacket(pData, length);
+}
+
+class BleMidiClientCallbacks : public BLEClientCallbacks {
+  void onConnect(BLEClient* pClient) override {
+    Serial.println("[BLE CENTRAL] Connected to BLE MIDI device!");
+  }
+  void onDisconnect(BLEClient* pClient) override {
+    for (int i = 0; i < MAX_BLE_CLIENTS; i++) {
+      if (s_bleSlots[i].client == pClient) {
+        Serial.printf("[BLE CENTRAL] Disconnected: %s\n", s_bleSlots[i].name);
+        s_bleSlots[i].connected = false;
+        s_bleSlots[i].address[0] = '\0';
+        s_bleSlots[i].name[0] = '\0';
       }
+    }
+    s_lastBleScanTime = millis() - 4000;
+  }
+};
+
+class BleMidiScanCallbacks : public BLEAdvertisedDeviceCallbacks {
+  void onResult(BLEAdvertisedDevice advertisedDevice) override {
+    if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(BLEUUID(BLE_MIDI_SERVICE_UUID))) {
+      String addrStr = advertisedDevice.getAddress().toString();
+      if (isBleAddressConnected(addrStr.c_str())) {
+        return; // Already connected to this device
+      }
+      String devName = advertisedDevice.getName();
+      if (devName.indexOf("FM-1") >= 0 || devName.indexOf("FM1") >= 0) {
+        Serial.printf("[BLE CENTRAL] Skipping synth '%s' (using wired TRS MIDI IN instead)\n", devName.c_str());
+        return;
+      }
+      Serial.printf("[BLE CENTRAL] Found BLE MIDI device: %s (%s)\n",
+                    devName.length() ? devName.c_str() : "Unnamed BLE MIDI",
+                    addrStr.c_str());
+      BLEDevice::getScan()->stop();
+      s_bleScanning = false;
+      if (s_pFoundBleDevice) {
+        delete s_pFoundBleDevice;
+        s_pFoundBleDevice = nullptr;
+      }
+      s_pFoundBleDevice = new BLEAdvertisedDevice(advertisedDevice);
+      s_bleDoConnect = true;
     }
   }
 };
+
+static void bleScanCompleteCallback(BLEScanResults results) {
+  s_bleScanning = false;
+}
+
+static bool connectToBleMidiController() {
+  if (!s_pFoundBleDevice) return false;
+
+  int freeSlot = -1;
+  for (int i = 0; i < MAX_BLE_CLIENTS; i++) {
+    if (!s_bleSlots[i].connected) {
+      freeSlot = i;
+      break;
+    }
+  }
+  if (freeSlot < 0) return false;
+
+  BleClientSlot& slot = s_bleSlots[freeSlot];
+  if (!slot.client) {
+    slot.client = BLEDevice::createClient();
+    slot.client->setClientCallbacks(new BleMidiClientCallbacks());
+  }
+
+  String addrStr = s_pFoundBleDevice->getAddress().toString();
+  Serial.printf("[BLE CENTRAL] Connecting slot %d to %s...\n", freeSlot, addrStr.c_str());
+
+  if (!slot.client->connect(s_pFoundBleDevice)) {
+    Serial.println("[BLE CENTRAL] Connection failed.");
+    return false;
+  }
+
+  BLERemoteService* pRemoteService = slot.client->getService(BLEUUID(BLE_MIDI_SERVICE_UUID));
+  if (!pRemoteService) {
+    Serial.println("[BLE CENTRAL] BLE MIDI service not found on device.");
+    slot.client->disconnect();
+    return false;
+  }
+
+  BLERemoteCharacteristic* pRemoteChar = pRemoteService->getCharacteristic(BLEUUID(BLE_MIDI_CHARACTERISTIC_UUID));
+  if (!pRemoteChar) {
+    Serial.println("[BLE CENTRAL] BLE MIDI characteristic not found.");
+    slot.client->disconnect();
+    return false;
+  }
+
+  if (pRemoteChar->canNotify()) {
+    pRemoteChar->registerForNotify(bleClientNotifyCallback);
+    Serial.println("[BLE CENTRAL] Subscribed to live BLE MIDI notes!");
+  }
+
+  strncpy(slot.address, addrStr.c_str(), sizeof(slot.address) - 1);
+  slot.address[sizeof(slot.address) - 1] = '\0';
+
+  String devName = s_pFoundBleDevice->getName();
+  if (devName.length() > 0) {
+    strncpy(slot.name, devName.c_str(), sizeof(slot.name) - 1);
+    slot.name[sizeof(slot.name) - 1] = '\0';
+  } else {
+    strncpy(slot.name, "BLE MIDI Ctrl", sizeof(slot.name) - 1);
+  }
+
+  slot.connected = true;
+  return true;
+}
 #endif // ENABLE_BLE_MIDI
 
 // ==============================================================================
@@ -350,6 +500,7 @@ void MidiIO::init() {
 
   // 1. Initialize Hardware UART 1 for 31,250 baud TRS MIDI OUT (GPIO 17)
   s_midiSerial.begin(MIDI_BAUD_RATE, SERIAL_8N1, -1, PIN_MIDI_TX);
+  Serial.printf("[OK] TRS MIDI OUT UART initialized on GPIO %d at %d baud.\n", PIN_MIDI_TX, MIDI_BAUD_RATE);
 
   // 2. Initialize Native ESP32-S3 USB Host Stack
 #if ENABLE_USB_HOST && defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -397,6 +548,17 @@ void MidiIO::init() {
   pAdvertising->setMinPreferred(0x06); // Fast iOS/BLE connection interval
   BLEDevice::startAdvertising();
   Serial.println("[OK] BLE Wireless MIDI advertising as 'S3 MIDI Brain'.");
+
+  // Also start async BLE Central scan to auto-connect to wireless controllers (e.g., SMC-PAD Pocket)
+  BLEScan* pScan = BLEDevice::getScan();
+  pScan->setAdvertisedDeviceCallbacks(new BleMidiScanCallbacks());
+  pScan->setInterval(1349);
+  pScan->setWindow(449);
+  pScan->setActiveScan(true);
+  pScan->start(4, bleScanCompleteCallback, false);
+  s_bleScanning = true;
+  s_lastBleScanTime = millis();
+  Serial.println("[OK] BLE Central scanning for nearby BLE MIDI controllers...");
 #endif
 }
 
@@ -404,6 +566,22 @@ void MidiIO::update() {
 #if ENABLE_USB_HOST && defined(CONFIG_IDF_TARGET_ESP32S3)
   if (s_usbHostReady && s_usbClientHandle) {
     usb_host_client_handle_events(s_usbClientHandle, 0);
+  }
+#endif
+
+#if ENABLE_BLE_MIDI
+  if (s_bleDoConnect) {
+    s_bleDoConnect = false;
+    connectToBleMidiController();
+  }
+
+  // Periodically re-scan every 5s as long as we have a free BLE Central slot
+  if (getConnectedBleClientCount() < MAX_BLE_CLIENTS && !s_bleScanning && (millis() - s_lastBleScanTime > 5000)) {
+    BLEScan* pScan = BLEDevice::getScan();
+    pScan->clearResults();
+    pScan->start(4, bleScanCompleteCallback, false);
+    s_bleScanning = true;
+    s_lastBleScanTime = millis();
   }
 #endif
 }
@@ -509,12 +687,12 @@ void MidiIO::sendNoteOn(uint8_t channel, uint8_t pitch, uint8_t velocity) {
   if (s_outTapNoteOnCb) s_outTapNoteOnCb(ch, p, v);
 
   uint8_t outMode = s_patchbay.outPort;
-
   // 1. Wired 3.5mm TRS Serial Output
   if (outMode == OUT_PORT_ALL || outMode == OUT_PORT_TRS_ONLY || outMode == OUT_PORT_TRS_AND_USB) {
     s_midiSerial.write(status);
     s_midiSerial.write(p);
     s_midiSerial.write(v);
+    Serial.printf("[TRS OUT] status=0x%02X p=%d v=%d\n", status, p, v);
   }
 
   // 2. USB Host Output
@@ -674,6 +852,11 @@ const char* MidiIO::getConnectedDeviceName() {
       return s_usbSlots[i].productName;
     }
   }
+  for (int i = MAX_BLE_CLIENTS - 1; i >= 0; i--) {
+    if (s_bleSlots[i].connected && s_bleSlots[i].name[0] != '\0') {
+      return s_bleSlots[i].name;
+    }
+  }
   if (s_bleConnected) return "BLE MIDI Connected";
   return "Waiting USB/BLE";
 }
@@ -693,7 +876,7 @@ uint8_t MidiIO::getConnectedUsbCount() {
   return count;
 }
 
-bool MidiIO::isBleConnected() { return s_bleConnected; }
+bool MidiIO::isBleConnected() { return s_bleConnected || (getConnectedBleClientCount() > 0); }
 
 void MidiIO::triggerVirtualNoteOn(uint8_t pitch, uint8_t velocity) {
   dispatchIncomingNoteOn(IN_PORT_ALL, 1, pitch, velocity);

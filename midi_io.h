@@ -65,7 +65,6 @@ public:
   static void triggerVirtualNoteOff(uint8_t pitch);
 
 private:
-  static HardwareSerial s_midiSerial;
   static NoteOnCallback s_noteOnCb;
   static NoteOffCallback s_noteOffCb;
   static ControlChangeCallback s_ccCb;

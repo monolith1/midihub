@@ -7,7 +7,8 @@ bool DisplayUI::s_isDirty = true;
 uint8_t DisplayUI::s_lastRenderedMode = 255;
 uint8_t DisplayUI::s_lastLayersMask = 255;
 
-static SPIClass s_epdSpi(FSPI);
+static const SPISettings EPD_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE0);
+static bool s_epdInitialized = false;
 
 // Compact 5x7 ASCII Font (0x20 Space to 0x7E '~')
 static const uint8_t FONT_5X7[][5] PROGMEM = {
@@ -211,62 +212,84 @@ void DisplayUI::drawText(int x, int y, const char* str, bool black, uint8_t scal
 // ==============================================================================
 
 void DisplayUI::epdSendCommand(uint8_t cmd) {
+  SPI.beginTransaction(EPD_SPI_SETTINGS);
   digitalWrite(PIN_EPD_DC, LOW);
   digitalWrite(PIN_EPD_CS, LOW);
-  s_epdSpi.transfer(cmd);
+  SPI.transfer(cmd);
   digitalWrite(PIN_EPD_CS, HIGH);
+  SPI.endTransaction();
 }
 
 void DisplayUI::epdSendData(uint8_t data) {
+  SPI.beginTransaction(EPD_SPI_SETTINGS);
   digitalWrite(PIN_EPD_DC, HIGH);
   digitalWrite(PIN_EPD_CS, LOW);
-  s_epdSpi.transfer(data);
+  SPI.transfer(data);
   digitalWrite(PIN_EPD_CS, HIGH);
+  SPI.endTransaction();
 }
 
 void DisplayUI::init() {
   pinMode(PIN_EPD_CS, OUTPUT);
   pinMode(PIN_EPD_DC, OUTPUT);
   pinMode(PIN_EPD_BUSY, INPUT);
+  pinMode(PIN_EPD_RST, OUTPUT);
 
   digitalWrite(PIN_EPD_CS, HIGH);
   digitalWrite(PIN_EPD_DC, HIGH);
+  digitalWrite(PIN_EPD_RST, HIGH);
 
-  // Initialize hardware SPI on pins SCK=12, MOSI=11
-  s_epdSpi.begin(PIN_EPD_SCK, -1, PIN_EPD_MOSI, PIN_EPD_CS);
-  s_epdSpi.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+  // Initialize shared hardware SPI on pins SCK=12, MISO=21, MOSI=11
+  SPI.begin(PIN_EPD_SCK, PIN_SD_MISO, PIN_EPD_MOSI, -1);
 
-  // SSD1681 / 1.54" V2 Initialization Sequence (Software Reset 0x12)
+  // Hardware Reset Pulse (guaranteed clean boot)
+  digitalWrite(PIN_EPD_RST, LOW);
+  delay(15);
+  digitalWrite(PIN_EPD_RST, HIGH);
+  delay(15);
+
+  // Wait for reset to finish
+  uint32_t t0 = millis();
+  while (digitalRead(PIN_EPD_BUSY) == HIGH && (millis() - t0 < 1000)) {
+    delay(5);
+  }
+
+  // SSD1681 Initialization Sequence
   epdSendCommand(0x12); // SWRESET
-  delay(10);
+  t0 = millis();
+  while (digitalRead(PIN_EPD_BUSY) == HIGH && (millis() - t0 < 1000)) {
+    delay(5);
+  }
 
   epdSendCommand(0x01); // Driver output control (200x200)
   epdSendData(0xC7);    // 199
   epdSendData(0x00);
   epdSendData(0x00);
 
-  epdSendCommand(0x11); // Data entry mode
-  epdSendData(0x03);    // X increment, Y increment
+  epdSendCommand(0x11); // Data entry mode: X inc, Y inc
+  epdSendData(0x03);
 
-  epdSendCommand(0x44); // Set RAM X start/end
+  epdSendCommand(0x44); // Set RAM X start/end: 0 to 24 (25 bytes = 200px)
   epdSendData(0x00);
-  epdSendData(0x18);    // 24 * 8 = 192..199 (25 bytes wide)
+  epdSendData(0x18);
 
-  epdSendCommand(0x45); // Set RAM Y start/end
+  epdSendCommand(0x45); // Set RAM Y start/end: 0 to 199
   epdSendData(0x00);
   epdSendData(0x00);
-  epdSendData(0xC7);    // 199
+  epdSendData(0xC7);
   epdSendData(0x00);
 
   epdSendCommand(0x3C); // Border Waveform
   epdSendData(0x05);
 
-  clearBuffer(false);
+  clearBuffer(false); // 0xFF = White background
+  s_epdInitialized = true;
   s_isDirty = true;
   s_lastDirtyTime = millis();
 }
 
 void DisplayUI::pushBufferToEPaper(bool fullRefresh) {
+  if (!s_epdInitialized) return;
   // Never block real-time MIDI if the E-Paper panel is still busy refreshing
   if (digitalRead(PIN_EPD_BUSY) == HIGH) {
     return;
@@ -281,18 +304,26 @@ void DisplayUI::pushBufferToEPaper(bool fullRefresh) {
 
   // Write 5,000-byte framebuffer to Black/White RAM (0x24)
   epdSendCommand(0x24);
+  SPI.beginTransaction(EPD_SPI_SETTINGS);
   digitalWrite(PIN_EPD_DC, HIGH);
   digitalWrite(PIN_EPD_CS, LOW);
-  s_epdSpi.writeBytes(s_frameBuffer, sizeof(s_frameBuffer));
+  SPI.writeBytes(s_frameBuffer, sizeof(s_frameBuffer));
   digitalWrite(PIN_EPD_CS, HIGH);
+  SPI.endTransaction();
 
-#if EPD_3COLOR_MODE
-  // For 3-color panels, clear the Red RAM plane (0x26)
+  // On standard 2-color SSD1681 panels, also mirror frameBuffer to 0x26 during full refreshes
+  // so the internal waveform differential engine calculates the crispest transition:
+  epdSendCommand(0x4E); epdSendData(0x00);
+  epdSendCommand(0x4F); epdSendData(0x00); epdSendData(0x00);
   epdSendCommand(0x26);
+  SPI.beginTransaction(EPD_SPI_SETTINGS);
+  digitalWrite(PIN_EPD_DC, HIGH);
+  digitalWrite(PIN_EPD_CS, LOW);
   for (size_t i = 0; i < sizeof(s_frameBuffer); i++) {
-    epdSendData(0x00);
+    SPI.transfer(0x00);
   }
-#endif
+  digitalWrite(PIN_EPD_CS, HIGH);
+  SPI.endTransaction();
 
   // Trigger Display Update Control 2 (0x22) & Master Activation (0x20)
   // 0xFF = Fast Partial Update, 0xF7 = Standard Full Refresh
