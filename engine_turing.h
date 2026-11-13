@@ -108,8 +108,10 @@ public:
   void onSwitch1(bool active) override {}
 
   void onSwitch2(bool active) override {
-    // Switch 2: Dedicated hardware FREEZE latch!
-    m_isFrozen = active;
+    // Tap to Toggle Loop Lock ON / OFF
+    if (active) {
+      m_isFrozen = !m_isFrozen;
+    }
   }
 
   uint32_t getBpm() const override { return m_bpm; }

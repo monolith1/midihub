@@ -126,8 +126,10 @@ public:
   void onSwitch1(bool active) override {}
 
   void onSwitch2(bool active) override {
-    // Switch 2: Infinite Ball Latch!
-    m_infiniteLatch = active;
+    // Tap to Toggle Infinite Bounce Latch ON / OFF
+    if (active) {
+      m_infiniteLatch = !m_infiniteLatch;
+    }
   }
 
   void getParamName(uint8_t idx, char* buf, size_t maxLen) const override {
