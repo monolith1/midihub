@@ -251,19 +251,156 @@ void DisplayUI::composeScreenRight(
   const EngineTuring* turing
 ) {
   clearBuffer(s_fbRight);
-
-  // Yellow Header Zone
-  drawText(s_fbRight, 2, 3, "LIVE ENGINE SCOPE", true, 1);
-  char bpmStr[8];
-  snprintf(bpmStr, sizeof(bpmStr), "%dB", currentEngine->getBpm());
-  drawText(s_fbRight, 100, 3, bpmStr, true, 1);
-  drawLine(s_fbRight, 0, 15, 127, 15, true);
-
-  // Blue Visualizer Zone: Reactive rendering based on current engine
   s_animPhase += 0.06f;
 
-  if (modeIndex == MODE_TURING && turing) {
-    // Turing algorithmic shift-register bits grid
+  // 1. Header Zone (y = 0..15)
+  if (modeIndex == MODE_VISUALIZER && visualizer) {
+    const char* styleNames[] = {"CANVAS: CONSTELL", "CANVAS: SPIRO", "CANVAS: CELLS", "CANVAS: RIBBON"};
+    uint8_t st = visualizer->getStyle() % NUM_VIS_STYLES;
+    drawText(s_fbRight, 2, 3, styleNames[st], true, 1);
+
+    if (visualizer->isFrozen()) {
+      fillRect(s_fbRight, 96, 2, 30, 9, true);
+      drawText(s_fbRight, 98, 3, "FROZ", false, 1);
+    } else {
+      char bpmStr[8];
+      snprintf(bpmStr, sizeof(bpmStr), "%dB", currentEngine->getBpm());
+      drawText(s_fbRight, 100, 3, bpmStr, true, 1);
+    }
+  } else {
+    // Other mode: show current engine name scope
+    char title[24];
+    snprintf(title, sizeof(title), "%s SCOPE", currentEngine->getName());
+    title[15] = '\0';
+    drawText(s_fbRight, 2, 3, title, true, 1);
+
+    char bpmStr[8];
+    snprintf(bpmStr, sizeof(bpmStr), "%dB", currentEngine->getBpm());
+    drawText(s_fbRight, 100, 3, bpmStr, true, 1);
+  }
+  drawLine(s_fbRight, 0, 15, 127, 15, true);
+
+  // 2. Visualizer Body Zone (y = 16..63)
+  if (modeIndex == MODE_VISUALIZER && visualizer) {
+    uint8_t style = visualizer->getStyle();
+
+    if (style == VIS_CONSTELLATION) {
+      // Style 0: 12-Tone Circle of Fifths Constellation
+      const int cx = 64;
+      const int cy = 39;
+      const int radius = 20;
+
+      int nodeX[12];
+      int nodeY[12];
+      for (int i = 0; i < 12; i++) {
+        float angle = (i * 2.0f * PI / 12.0f) - (PI / 2.0f);
+        nodeX[i] = cx + (int)(cosf(angle) * radius);
+        nodeY[i] = cy + (int)(sinf(angle) * radius);
+        drawPixel(s_fbRight, nodeX[i], nodeY[i], true);
+      }
+
+      // Draw constellation lines between active notes
+      uint16_t mask = visualizer->getNotesMask();
+      int activeNodes[12];
+      int activeCount = 0;
+      for (int i = 0; i < 12; i++) {
+        if (mask & (1 << i)) {
+          activeNodes[activeCount++] = i;
+          fillCircle(s_fbRight, nodeX[i], nodeY[i], 2, true);
+        }
+      }
+
+      if (activeCount >= 2) {
+        for (int a = 0; a < activeCount; a++) {
+          for (int b = a + 1; b < activeCount; b++) {
+            drawLine(s_fbRight, nodeX[activeNodes[a]], nodeY[activeNodes[a]],
+                                nodeX[activeNodes[b]], nodeY[activeNodes[b]], true);
+          }
+        }
+      } else {
+        // If not playing chords right now, connect recent notes from history
+        uint8_t density = visualizer->getDensity();
+        int maxNotes = density * 3;
+        int prevNode = -1;
+        for (int h = 0; h < maxNotes; h++) {
+          const NoteHistoryEntry& entry = visualizer->getHistoryEntry(h);
+          if (entry.velocity > 0) {
+            int n = entry.pitch % 12;
+            fillCircle(s_fbRight, nodeX[n], nodeY[n], 1, true);
+            if (prevNode >= 0 && prevNode != n) {
+              drawLine(s_fbRight, nodeX[prevNode], nodeY[prevNode], nodeX[n], nodeY[n], true);
+            }
+            prevNode = n;
+          }
+        }
+      }
+    }
+    else if (style == VIS_SPIROGRAPH) {
+      // Style 1: Algorithmic Lissajous / Spiro-Ink curves
+      uint8_t density = visualizer->getDensity();
+      uint8_t pitch = visualizer->getLastPitch();
+      uint8_t vel = visualizer->getLastVel();
+
+      float f1 = 1.0f + (density * 0.75f);
+      float f2 = 2.0f + (pitch % 5);
+      float r1 = 12.0f + (vel * 0.08f);
+      float r2 = 6.0f + (density * 1.5f);
+
+      int steps = 28 * density;
+      int lastX = -1, lastY = -1;
+      for (int s = 0; s <= steps; s++) {
+        float t = (s * 2.0f * PI) / (float)steps;
+        float px = 64.0f + (r1 * cosf(f1 * t + s_animPhase)) + (r2 * cosf(f2 * t));
+        float py = 39.0f + (r1 * sinf(f1 * t + s_animPhase)) - (r2 * sinf(f2 * t));
+        int ix = (int)px;
+        int iy = (int)py;
+        if (lastX >= 0 && lastY >= 0) {
+          drawLine(s_fbRight, lastX, lastY, ix, iy, true);
+        }
+        lastX = ix;
+        lastY = iy;
+      }
+    }
+    else if (style == VIS_CELLULAR) {
+      // Style 2: Conway's Game of Life 16x16 Grid
+      drawRect(s_fbRight, 38, 20, 52, 36, true);
+      for (int y = 0; y < 16; y++) {
+        uint16_t row = visualizer->getLifeRow(y);
+        if (row == 0) continue;
+        for (int x = 0; x < 16; x++) {
+          if (row & (1 << x)) {
+            fillRect(s_fbRight, 40 + (x * 3), 22 + (y * 2), 2, 2, true);
+          }
+        }
+      }
+    }
+    else if (style == VIS_RIBBON) {
+      // Style 3: Scrolling mechanical player-piano ribbon
+      for (int y = 20; y <= 56; y += 12) {
+        drawPixel(s_fbRight, 2, y, true);
+        drawPixel(s_fbRight, 3, y, true);
+      }
+      drawLine(s_fbRight, 5, 18, 5, 60, true);
+
+      for (int h = 0; h < EngineVisualizer::HISTORY_LEN; h++) {
+        const NoteHistoryEntry& entry = visualizer->getHistoryEntry(h);
+        if (entry.velocity == 0) continue;
+        int y = map(constrain((int)entry.pitch, 36, 84), 36, 84, 58, 20);
+        int x = 120 - (h * 7);
+        int w = map(entry.velocity, 1, 127, 3, 6);
+        fillRect(s_fbRight, x - w, y - 1, w, 3, true);
+      }
+    }
+
+    // Inverted ink theme (Light on Dark vs Dark on Light)
+    if (visualizer->isInverted()) {
+      for (uint16_t b = 256; b < 1024; b++) {
+        s_fbRight[b] ^= 0xFF;
+      }
+    }
+  }
+  else if (modeIndex == MODE_TURING && turing) {
+    // Mode 3: Turing algorithmic shift-register bits grid
     uint16_t reg = turing->getShiftRegister();
     for (int i = 0; i < 16; i++) {
       int bx = 8 + (i % 8) * 14;
@@ -273,10 +410,56 @@ void DisplayUI::composeScreenRight(
         fillRect(s_fbRight, bx + 2, by + 2, 6, 8, true);
       }
     }
-  } else {
-    // Dynamic organic fluid scope
+  }
+  else if (modeIndex == MODE_PHYSICS) {
+    // Mode 6: Gravitational bouncing balls
+    drawLine(s_fbRight, 8, 60, 119, 60, true); // Floor
+    for (int b = 0; b < 4; b++) {
+      float spd = 1.0f + b * 0.4f;
+      float ph = s_animPhase * spd + (b * 1.5f);
+      float bounce = fabsf(sinf(ph));
+      int bx = 20 + b * 26;
+      int by = 56 - (int)(bounce * 34.0f);
+      fillCircle(s_fbRight, bx, by, 3, true);
+      if (bounce < 0.15f) {
+        drawLine(s_fbRight, bx - 5, 59, bx + 5, 59, true);
+      }
+    }
+  }
+  else if (modeIndex == MODE_LOFI) {
+    // Mode 2: Lo-Fi cassette dual tape reels
+    drawCircle(s_fbRight, 40, 39, 14, true);
+    drawCircle(s_fbRight, 88, 39, 14, true);
+    fillCircle(s_fbRight, 40, 39, 3, true);
+    fillCircle(s_fbRight, 88, 39, 3, true);
+
+    for (int s = 0; s < 3; s++) {
+      float a1 = s_animPhase * 1.5f + (s * 2.094f);
+      float a2 = s_animPhase * 1.4f + (s * 2.094f);
+      drawLine(s_fbRight, 40, 39, 40 + (int)(cosf(a1) * 12), 39 + (int)(sinf(a1) * 12), true);
+      drawLine(s_fbRight, 88, 39, 88 + (int)(cosf(a2) * 12), 39 + (int)(sinf(a2) * 12), true);
+    }
+    drawLine(s_fbRight, 40, 25, 88, 25, true);
+  }
+  else if (modeIndex == MODE_MORPH) {
+    // Mode 4: FM Vector joystick crosshair
+    drawRect(s_fbRight, 36, 18, 56, 44, true);
+    drawText(s_fbRight, 39, 20, "1", true, 1);
+    drawText(s_fbRight, 84, 20, "2", true, 1);
+    drawText(s_fbRight, 39, 53, "3", true, 1);
+    drawText(s_fbRight, 84, 53, "4", true, 1);
+
+    int mx = 64 + (int)(cosf(s_animPhase * 0.8f) * 18.0f);
+    int my = 40 + (int)(sinf(s_animPhase * 0.6f) * 14.0f);
+    drawLine(s_fbRight, mx - 4, my, mx + 4, my, true);
+    drawLine(s_fbRight, mx, my - 4, mx, my + 4, true);
+    drawCircle(s_fbRight, mx, my, 3, true);
+  }
+  else {
+    // Bypass, Patchbay, Tuning: Dynamic reactive fluid scope
+    float pitchFreq = 0.05f + ((visualizer ? visualizer->getLastPitch() : 60) % 24) * 0.004f;
     for (int x = 0; x < 128; x++) {
-      float yf = 39.0f + 15.0f * sinf(s_animPhase + x * 0.09f) * cosf(s_animPhase * 0.6f);
+      float yf = 39.0f + 16.0f * sinf(s_animPhase + x * pitchFreq) * cosf(s_animPhase * 0.5f + x * 0.02f);
       int y = (int)yf;
       drawLine(s_fbRight, x, 39, x, y, true);
     }

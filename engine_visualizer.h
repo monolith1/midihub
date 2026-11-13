@@ -20,7 +20,7 @@ public:
     : m_style(VIS_CONSTELLATION), m_persistence(75), m_density(2),
       m_inverted(false), m_isFrozen(false), m_activeNotesMask(0),
       m_lastPitch(60), m_lastVel(100), m_historyHead(0),
-      m_bgSoundEngine(nullptr) {
+      m_lastLifeStep(0), m_bgSoundEngine(nullptr) {
     memset(m_history, 0, sizeof(m_history));
     memset(m_lifeGrid, 0, sizeof(m_lifeGrid));
     // Seed initial cellular pattern
@@ -45,6 +45,15 @@ public:
     // Keep the active sound engine (Lo-Fi, Turing, Morph, Physics, etc.) running in the background!
     if (m_bgSoundEngine && m_bgSoundEngine != this) {
       m_bgSoundEngine->update();
+    }
+
+    // Step Game of Life at a musical rate when active and not frozen
+    if (!m_isFrozen && m_style == VIS_CELLULAR) {
+      uint32_t now = millis();
+      if (now - m_lastLifeStep >= 350) {
+        m_lastLifeStep = now;
+        stepGameOfLife();
+      }
     }
   }
 
@@ -211,6 +220,7 @@ private:
   NoteHistoryEntry m_history[HISTORY_LEN];
   uint8_t m_historyHead;
   uint16_t m_lifeGrid[16];
+  uint32_t m_lastLifeStep;
   MidiEngine* m_bgSoundEngine;
 
   void stepGameOfLife() {
