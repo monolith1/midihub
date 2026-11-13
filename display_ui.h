@@ -24,53 +24,34 @@ public:
     const char* deviceName
   );
 
-  // --- Low-Level 200x200 1-Bit Framebuffer Primitives ---
-  static void clearBuffer(bool blackBg = false);
-  static void drawPixel(int x, int y, bool black = true);
-  static void drawLine(int x0, int y0, int x1, int y1, bool black = true);
-  static void drawRect(int x, int y, int w, int h, bool black = true);
-  static void fillRect(int x, int y, int w, int h, bool black = true);
-  static void drawCircle(int cx, int cy, int r, bool black = true);
-  static void fillCircle(int cx, int cy, int r, bool black = true);
-  static void drawChar(int x, int y, char c, bool black = true, uint8_t scale = 1);
-  static void drawText(int x, int y, const char* str, bool black = true, uint8_t scale = 1);
+  // --- Framebuffer Drawing Primitives ---
+  static void clearBuffer(uint8_t* fb);
+  static void drawPixel(uint8_t* fb, int x, int y, bool on = true);
+  static void drawLine(uint8_t* fb, int x0, int y0, int x1, int y1, bool on = true);
+  static void drawRect(uint8_t* fb, int x, int y, int w, int h, bool on = true);
+  static void fillRect(uint8_t* fb, int x, int y, int w, int h, bool on = true);
+  static void drawCircle(uint8_t* fb, int cx, int cy, int r, bool on = true);
+  static void fillCircle(uint8_t* fb, int cx, int cy, int r, bool on = true);
+  static void drawChar(uint8_t* fb, int x, int y, char c, bool on = true, uint8_t scale = 1);
+  static void drawText(uint8_t* fb, int x, int y, const char* str, bool on = true, uint8_t scale = 1);
 
 private:
-  static uint8_t s_frameBuffer[(EPD_WIDTH * EPD_HEIGHT) / 8];
-  static uint32_t s_lastDirtyTime;
+  static uint8_t s_fbLeft[1024];  // Screen 1: Parameters (128x64 / 8)
+  static uint8_t s_fbRight[1024]; // Screen 2: Visualizer (128x64 / 8)
+  static uint32_t s_lastRenderTime;
   static bool s_isDirty;
-  static uint8_t s_lastRenderedMode;
-  static uint8_t s_lastLayersMask;
 
-  static void composeFrame(
+  static void composeScreenLeft(
     const MidiEngine* currentEngine,
     uint8_t modeIndex,
     uint8_t activeLayersMask,
-    const char* deviceName,
+    const char* deviceName
+  );
+
+  static void composeScreenRight(
+    const MidiEngine* currentEngine,
+    uint8_t modeIndex,
     const EngineVisualizer* visualizer,
     const EngineTuring* turing
   );
-  static void drawHeader(
-    const char* modeName,
-    uint32_t bpm,
-    uint8_t activeLayersMask,
-    const char* deviceName,
-    bool inkColor
-  );
-  static void drawCenterGraphic(
-    const MidiEngine* currentEngine,
-    uint8_t modeIndex,
-    const EngineVisualizer* visualizer,
-    const EngineTuring* turing,
-    bool inkColor
-  );
-  static void drawFooterParameters(
-    const MidiEngine* currentEngine,
-    bool inkColor
-  );
-
-  // Non-blocking E-Paper SPI hardware transmitter
-  static void pushBufferToEPaper(bool fullRefresh);
-  static void epdSendCommand(uint8_t cmd);
-  static void epdSendData(uint8_t data);
 };
