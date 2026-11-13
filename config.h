@@ -27,11 +27,11 @@
 #define PIN_EPD_RST           16   // Hardware Reset Line (GPIO 16)
 
 // --- MicroSD Card SPI Bus (Standard FAT32) ---
-// Shares high-speed SPI bus with E-Paper (MOSI 11, SCK 12); uses dedicated CS & MISO
-#define PIN_SD_MOSI           11   // Shared SPI MOSI
-#define PIN_SD_SCK            12   // Shared SPI SCK
-#define PIN_SD_MISO           21   // SPI MISO (Card data out to ESP32)
-#define PIN_SD_CS             18   // MicroSD Chip Select (Dedicated)
+// Dedicated high-speed SPI bus on free GPIOs (Zero conflict with Dual I2C OLEDs)
+#define PIN_SD_SCK            7    // SPI Clock (CLK)
+#define PIN_SD_MOSI           16   // SPI MOSI (DI - Data In to SD card)
+#define PIN_SD_MISO           21   // SPI MISO (DO - Data Out from SD card)
+#define PIN_SD_CS             18   // MicroSD Chip Select (CS - Active Low)
 
 // --- 4 Parameter Rotary Encoders (EC11 Standard with Push Switch) ---
 #define PIN_ENC1_A            1
